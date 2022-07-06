@@ -19,7 +19,6 @@
 package org.apache.flink.connector.file.src.impl;
 
 import org.apache.flink.annotation.Internal;
-import org.apache.flink.api.common.functions.FilterFunction;
 import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
@@ -29,9 +28,7 @@ import org.apache.flink.connector.file.src.assigners.FileSplitAssigner;
 import org.apache.flink.connector.file.src.enumerate.FileEnumerator;
 import org.apache.flink.connector.file.src.util.PartitionPruningWrapper;
 import org.apache.flink.core.fs.Path;
-
 import org.apache.flink.table.catalog.CatalogPartitionSpec;
-
 import org.apache.flink.table.utils.PartitionPathUtils;
 
 import org.slf4j.Logger;
@@ -74,7 +71,6 @@ public class ContinuousFileSplitEnumerator
     private final long discoveryInterval;
 
     private final PartitionPruningWrapper partitionPruningWrapper;
-
 
     // ------------------------------------------------------------------------
 
@@ -156,11 +152,13 @@ public class ContinuousFileSplitEnumerator
 
         final Collection<FileSourceSplit> newSplits =
                 splits.stream()
-                        .filter(split -> partitionPruningWrapper.prune(convertSplitToPartitionSpec(split)))
+                        .filter(
+                                split ->
+                                        partitionPruningWrapper.prune(
+                                                convertSplitToPartitionSpec(split)))
                         .filter((split) -> pathsAlreadyProcessed.add(split.path()))
                         .collect(Collectors.toList());
         splitAssigner.addSplits(newSplits);
-
 
         assignSplits();
     }
@@ -192,6 +190,7 @@ public class ContinuousFileSplitEnumerator
     }
 
     private CatalogPartitionSpec convertSplitToPartitionSpec(FileSourceSplit split) {
-       return new CatalogPartitionSpec(PartitionPathUtils.extractPartitionSpecFromPath(split.path()));
+        return new CatalogPartitionSpec(
+                PartitionPathUtils.extractPartitionSpecFromPath(split.path()));
     }
 }

@@ -82,7 +82,7 @@ public abstract class AbstractFileSource<T, SplitT extends FileSourceSplit>
 
     @Nullable private final ContinuousEnumerationSettings continuousEnumerationSettings;
 
-    protected final PartitionPruningWrapper partitionPruningWrapper;
+    protected PartitionPruningWrapper partitionPruningWrapper;
 
     // ------------------------------------------------------------------------
 
@@ -219,8 +219,7 @@ public abstract class AbstractFileSource<T, SplitT extends FileSourceSplit>
                             inputPaths,
                             alreadyProcessedPaths,
                             continuousEnumerationSettings.getDiscoveryInterval().toMillis(),
-                            partitionPruningWrapper)
-                    );
+                            partitionPruningWrapper));
         }
     }
 
@@ -312,8 +311,10 @@ public abstract class AbstractFileSource<T, SplitT extends FileSourceSplit>
             return self();
         }
 
-        public SELF partitionsPruningFunction(FilterFunction<CatalogPartitionSpec> partitionsPruningFunction) {
-            checkNotNull(partitionsPruningFunction, "partitionsPruningFunction should not be null.");
+        public SELF partitionsPruningFunction(
+                FilterFunction<CatalogPartitionSpec> partitionsPruningFunction) {
+            checkNotNull(
+                    partitionsPruningFunction, "partitionsPruningFunction should not be null.");
             this.partitionsPruningFunction = partitionsPruningFunction;
             return self();
         }

@@ -343,7 +343,8 @@ public class FileSystemTableSource extends AbstractFileSystemTable
     }
 
     @Override
-    public void applyPartitionPuringFunction(FilterFunction<CatalogPartitionSpec> partitionsPruningFunction) {
+    public void applyPartitionPuringFunction(
+            FilterFunction<CatalogPartitionSpec> partitionsPruningFunction) {
         this.partitionsPruningFunction = partitionsPruningFunction;
     }
 

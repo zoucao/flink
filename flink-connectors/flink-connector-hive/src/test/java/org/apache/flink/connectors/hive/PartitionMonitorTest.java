@@ -21,6 +21,7 @@ package org.apache.flink.connectors.hive;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.configuration.Configuration;
+import org.apache.flink.connector.file.src.util.PartitionPruningWrapper;
 import org.apache.flink.connector.file.table.ContinuousPartitionFetcher;
 import org.apache.flink.connector.file.table.PartitionFetcher;
 import org.apache.flink.connectors.hive.read.HiveContinuousPartitionContext;
@@ -185,6 +186,6 @@ public class PartitionMonitorTest {
                         jobConf,
                         continuousPartitionFetcher,
                         fetcherContext,
-                        partitionPruningWrapper);
+                        PartitionPruningWrapper.wrap(null));
     }
 }

@@ -134,6 +134,86 @@ public class HiveTableSourceITCase extends BatchAbstractTestBase {
     }
 
     @Test
+    public void testPushDown() throws Exception {
+        final String catalogName = "hive";
+        final String dbName = "source_db";
+        final String tblName = "stream_test";
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.getExecutionEnvironment();
+        env.enableCheckpointing(10 * 1000);
+        StreamTableEnvironment tEnv =
+                HiveTestUtils.createTableEnvInStreamingMode(env, SqlDialect.HIVE);
+        tEnv.registerCatalog(catalogName, hiveCatalog);
+        tEnv.useCatalog(catalogName);
+        tEnv.executeSql(
+                "CREATE TABLE source_db.stream_test ("
+                        + " a INT,"
+                        + " b STRING"
+                        + ") PARTITIONED BY (ts int) TBLPROPERTIES ("
+                        + "'streaming-source.enable'='true',"
+                        + "'streaming-source.monitor-interval'='10s',"
+                        + "'streaming-source.consume-order'='partition-name',"
+                        + "'streaming-source.consume-start-offset'='ts=0'"
+                        + ")");
+
+        HiveTestUtils.createTextTableInserter(hiveCatalog, dbName, tblName)
+                .addRow(new Object[] {0, "a0"})
+                .addRow(new Object[] {1, "a0"})
+                .commit("ts=0");
+        HiveTestUtils.createTextTableInserter(hiveCatalog, dbName, tblName)
+                .addRow(new Object[] {1, "a1"})
+                .addRow(new Object[] {2, "a1"})
+                .commit("ts=1");
+
+        HiveTestUtils.createTextTableInserter(hiveCatalog, dbName, tblName)
+                .addRow(new Object[] {1, "a2"})
+                .addRow(new Object[] {2, "a2"})
+                .commit("ts=2");
+        // System.out.println(tEnv.explainSql("select * from hive.source_db.stream_test where ts >
+        // 1"));
+        TableResult result =
+                tEnv.executeSql("select * from hive.source_db.stream_test where ts > 1");
+        result.print();
+
+
+//        Caused by: java.lang.ClassNotFoundException: PartitionPruner$0
+//        at java.net.URLClassLoader.findClass(URLClassLoader.java:382)
+//        at java.lang.ClassLoader.loadClass(ClassLoader.java:418)
+//        at org.apache.flink.util.FlinkUserCodeClassLoader.loadClassWithoutExceptionHandling(FlinkUserCodeClassLoader.java:67)
+//        at org.apache.flink.util.ChildFirstClassLoader.loadClassWithoutExceptionHandling(ChildFirstClassLoader.java:74)
+//        at org.apache.flink.util.FlinkUserCodeClassLoader.loadClass(FlinkUserCodeClassLoader.java:51)
+//        at java.lang.ClassLoader.loadClass(ClassLoader.java:351)
+//        at org.apache.flink.util.FlinkUserCodeClassLoaders$SafetyNetWrapperClassLoader.loadClass(FlinkUserCodeClassLoaders.java:171)
+//        at java.lang.Class.forName0(Native Method)
+//        at java.lang.Class.forName(Class.java:348)
+//        at org.apache.flink.util.InstantiationUtil$ClassLoaderObjectInputStream.resolveClass(InstantiationUtil.java:78)
+//        at java.io.ObjectInputStream.readNonProxyDesc(ObjectInputStream.java:1925)
+//        at java.io.ObjectInputStream.readClassDesc(ObjectInputStream.java:1808)
+//        at java.io.ObjectInputStream.readOrdinaryObject(ObjectInputStream.java:2099)
+//        at java.io.ObjectInputStream.readObject0(ObjectInputStream.java:1625)
+//        at java.io.ObjectInputStream.defaultReadFields(ObjectInputStream.java:2344)
+//        at java.io.ObjectInputStream.readSerialData(ObjectInputStream.java:2268)
+//        at java.io.ObjectInputStream.readOrdinaryObject(ObjectInputStream.java:2126)
+//        at java.io.ObjectInputStream.readObject0(ObjectInputStream.java:1625)
+//        at java.io.ObjectInputStream.defaultReadFields(ObjectInputStream.java:2344)
+//        at java.io.ObjectInputStream.readSerialData(ObjectInputStream.java:2268)
+//        at java.io.ObjectInputStream.readOrdinaryObject(ObjectInputStream.java:2126)
+//        at java.io.ObjectInputStream.readObject0(ObjectInputStream.java:1625)
+//        at java.io.ObjectInputStream.defaultReadFields(ObjectInputStream.java:2344)
+//        at java.io.ObjectInputStream.readSerialData(ObjectInputStream.java:2268)
+//        at java.io.ObjectInputStream.readOrdinaryObject(ObjectInputStream.java:2126)
+//        at java.io.ObjectInputStream.readObject0(ObjectInputStream.java:1625)
+//        at java.io.ObjectInputStream.readObject(ObjectInputStream.java:465)
+//        at java.io.ObjectInputStream.readObject(ObjectInputStream.java:423)
+//        at org.apache.flink.util.InstantiationUtil.deserializeObject(InstantiationUtil.java:617)
+//        at org.apache.flink.util.InstantiationUtil.deserializeObject(InstantiationUtil.java:602)
+//        at org.apache.flink.util.InstantiationUtil.deserializeObject(InstantiationUtil.java:589)
+//        at org.apache.flink.util.SerializedValue.deserializeValue(SerializedValue.java:67)
+//        at org.apache.flink.runtime.operators.coordination.OperatorCoordinatorHolder.create(OperatorCoordinatorHolder.java:433)
+//        at org.apache.flink.runtime.executiongraph.ExecutionJobVertex.initialize(ExecutionJobVertex.java:223)
+
+    }
+
+    @Test
     public void testReadComplexDataType() throws Exception {
         final String dbName = "source_db";
         final String tblName = "complex_test";
