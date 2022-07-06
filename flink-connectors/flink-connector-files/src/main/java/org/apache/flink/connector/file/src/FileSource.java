@@ -19,6 +19,7 @@
 package org.apache.flink.connector.file.src;
 
 import org.apache.flink.annotation.PublicEvolving;
+import org.apache.flink.api.common.functions.FilterFunction;
 import org.apache.flink.connector.file.src.assigners.FileSplitAssigner;
 import org.apache.flink.connector.file.src.assigners.LocalityAwareSplitAssigner;
 import org.apache.flink.connector.file.src.enumerate.BlockSplittingRecursiveEnumerator;
@@ -32,6 +33,7 @@ import org.apache.flink.connector.file.src.reader.StreamFormat;
 import org.apache.flink.core.fs.FileSystem;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
+import org.apache.flink.table.catalog.CatalogPartitionSpec;
 
 import javax.annotation.Nullable;
 
@@ -126,14 +128,16 @@ public final class FileSource<T> extends AbstractFileSource<T, FileSourceSplit> 
             final FileEnumerator.Provider fileEnumerator,
             final FileSplitAssigner.Provider splitAssigner,
             final BulkFormat<T, FileSourceSplit> readerFormat,
-            @Nullable final ContinuousEnumerationSettings continuousEnumerationSettings) {
+            @Nullable final ContinuousEnumerationSettings continuousEnumerationSettings,
+            @Nullable final FilterFunction<CatalogPartitionSpec> partitionsPruningFunction) {
 
         super(
                 inputPaths,
                 fileEnumerator,
                 splitAssigner,
                 readerFormat,
-                continuousEnumerationSettings);
+                continuousEnumerationSettings,
+                partitionsPruningFunction);
     }
 
     @Override
@@ -226,7 +230,8 @@ public final class FileSource<T> extends AbstractFileSource<T, FileSourceSplit> 
                     fileEnumerator,
                     splitAssigner,
                     readerFormat,
-                    continuousSourceSettings);
+                    continuousSourceSettings,
+                    partitionsPruningFunction);
         }
     }
 }

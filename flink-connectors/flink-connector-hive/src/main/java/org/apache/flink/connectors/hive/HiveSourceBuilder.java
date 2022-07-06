@@ -19,6 +19,7 @@
 package org.apache.flink.connectors.hive;
 
 import org.apache.flink.annotation.PublicEvolving;
+import org.apache.flink.api.common.functions.FilterFunction;
 import org.apache.flink.configuration.Configuration;
 import org.apache.flink.configuration.ReadableConfig;
 import org.apache.flink.connector.file.src.ContinuousEnumerationSettings;
@@ -35,6 +36,7 @@ import org.apache.flink.connectors.hive.util.HivePartitionUtils;
 import org.apache.flink.connectors.hive.util.JobConfUtils;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.TableSchema;
+import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.hive.HiveCatalog;
@@ -91,6 +93,7 @@ public class HiveSourceBuilder {
     private int[] projectedFields;
     private Long limit;
     private List<HiveTablePartition> partitions;
+    private FilterFunction<CatalogPartitionSpec> partitionsPruningFunction;
 
     /**
      * Creates a builder to read a hive table.
@@ -247,7 +250,8 @@ public class HiveSourceBuilder {
                 tablePath,
                 partitionKeys,
                 fetcher,
-                fetcherContext);
+                fetcherContext,
+                partitionsPruningFunction);
     }
 
     /**
@@ -272,6 +276,12 @@ public class HiveSourceBuilder {
      */
     public HiveSourceBuilder setProjectedFields(int[] projectedFields) {
         this.projectedFields = projectedFields;
+        return this;
+    }
+
+    public HiveSourceBuilder setPartitionPruningFunction(
+            FilterFunction<CatalogPartitionSpec> partitionsPruningFunction) {
+        this.partitionsPruningFunction = partitionsPruningFunction;
         return this;
     }
 

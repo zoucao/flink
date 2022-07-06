@@ -19,6 +19,7 @@
 package org.apache.flink.connector.file.table;
 
 import org.apache.flink.annotation.Internal;
+import org.apache.flink.api.common.functions.FilterFunction;
 import org.apache.flink.api.common.serialization.DeserializationSchema;
 import org.apache.flink.api.java.io.CollectionInputFormat;
 import org.apache.flink.configuration.ReadableConfig;
@@ -31,6 +32,7 @@ import org.apache.flink.core.fs.Path;
 import org.apache.flink.table.api.DataTypes;
 import org.apache.flink.table.api.TableException;
 import org.apache.flink.table.api.ValidationException;
+import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.catalog.ObjectIdentifier;
 import org.apache.flink.table.connector.ChangelogMode;
 import org.apache.flink.table.connector.Projection;
@@ -91,6 +93,8 @@ public class FileSystemTableSource extends AbstractFileSystemTable
 
     // These mutable fields
     private List<Map<String, String>> remainingPartitions;
+
+    @Nullable private FilterFunction<CatalogPartitionSpec> partitionsPruningFunction;
     private List<ResolvedExpression> filters;
     private Long limit;
     private int[][] projectFields;
@@ -264,6 +268,11 @@ public class FileSystemTableSource extends AbstractFileSystemTable
         tableOptions
                 .getOptional(FileSystemConnectorOptions.SOURCE_MONITOR_INTERVAL)
                 .ifPresent(fileSourceBuilder::monitorContinuously);
+        if (tableOptions.getOptional(FileSystemConnectorOptions.SOURCE_MONITOR_INTERVAL).isPresent()
+                && !partitionKeys.isEmpty()
+                && partitionsPruningFunction != null) {
+            fileSourceBuilder.partitionsPruningFunction(partitionsPruningFunction);
+        }
 
         return SourceProvider.of(fileSourceBuilder.build());
     }
@@ -331,6 +340,11 @@ public class FileSystemTableSource extends AbstractFileSystemTable
     @Override
     public void applyPartitions(List<Map<String, String>> remainingPartitions) {
         this.remainingPartitions = remainingPartitions;
+    }
+
+    @Override
+    public void applyPartitionPuringFunction(FilterFunction<CatalogPartitionSpec> partitionsPruningFunction) {
+        this.partitionsPruningFunction = partitionsPruningFunction;
     }
 
     @Override

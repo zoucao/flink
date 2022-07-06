@@ -184,6 +184,7 @@ public class PartitionMonitorTest {
                                 HiveOptions.TABLE_EXEC_HIVE_LOAD_PARTITION_SPLITS_THREAD_NUM),
                         jobConf,
                         continuousPartitionFetcher,
-                        fetcherContext);
+                        fetcherContext,
+                        partitionPruningWrapper);
     }
 }

@@ -19,6 +19,7 @@
 package org.apache.flink.connectors.hive;
 
 import org.apache.flink.annotation.PublicEvolving;
+import org.apache.flink.api.common.functions.FilterFunction;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
@@ -32,6 +33,7 @@ import org.apache.flink.connector.file.table.ContinuousPartitionFetcher;
 import org.apache.flink.connectors.hive.read.HiveSourceSplit;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
+import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.data.RowData;
 import org.apache.flink.util.Preconditions;
@@ -77,13 +79,15 @@ public class HiveSource<T> extends AbstractFileSource<T, HiveSourceSplit> {
             ObjectPath tablePath,
             List<String> partitionKeys,
             @Nullable ContinuousPartitionFetcher<Partition, ?> fetcher,
-            @Nullable HiveTableSource.HiveContinuousPartitionFetcherContext<?> fetcherContext) {
+            @Nullable HiveTableSource.HiveContinuousPartitionFetcherContext<?> fetcherContext,
+            @Nullable final FilterFunction<CatalogPartitionSpec> partitionsPruningFunction) {
         super(
                 inputPaths,
                 fileEnumerator,
                 splitAssigner,
                 readerFormat,
-                continuousEnumerationSettings);
+                continuousEnumerationSettings,
+                partitionsPruningFunction);
         Preconditions.checkArgument(
                 threadNum >= 1,
                 HiveOptions.TABLE_EXEC_HIVE_LOAD_PARTITION_SPLITS_THREAD_NUM.key()
@@ -167,6 +171,7 @@ public class HiveSource<T> extends AbstractFileSource<T, HiveSourceSplit> {
                 jobConfWrapper.conf(),
                 tablePath,
                 fetcher,
-                fetcherContext);
+                fetcherContext,
+                partitionPruningWrapper);
     }
 }

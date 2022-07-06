@@ -19,6 +19,7 @@
 package org.apache.flink.connector.file.src.impl;
 
 import org.apache.flink.annotation.Internal;
+import org.apache.flink.api.common.functions.FilterFunction;
 import org.apache.flink.api.connector.source.SourceEvent;
 import org.apache.flink.api.connector.source.SplitEnumerator;
 import org.apache.flink.api.connector.source.SplitEnumeratorContext;
@@ -26,7 +27,12 @@ import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.PendingSplitsCheckpoint;
 import org.apache.flink.connector.file.src.assigners.FileSplitAssigner;
 import org.apache.flink.connector.file.src.enumerate.FileEnumerator;
+import org.apache.flink.connector.file.src.util.PartitionPruningWrapper;
 import org.apache.flink.core.fs.Path;
+
+import org.apache.flink.table.catalog.CatalogPartitionSpec;
+
+import org.apache.flink.table.utils.PartitionPathUtils;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -67,6 +73,9 @@ public class ContinuousFileSplitEnumerator
 
     private final long discoveryInterval;
 
+    private final PartitionPruningWrapper partitionPruningWrapper;
+
+
     // ------------------------------------------------------------------------
 
     public ContinuousFileSplitEnumerator(
@@ -75,7 +84,8 @@ public class ContinuousFileSplitEnumerator
             FileSplitAssigner splitAssigner,
             Path[] paths,
             Collection<Path> alreadyDiscoveredPaths,
-            long discoveryInterval) {
+            long discoveryInterval,
+            PartitionPruningWrapper partitionPruningWrapper) {
 
         checkArgument(discoveryInterval > 0L);
         this.context = checkNotNull(context);
@@ -85,10 +95,12 @@ public class ContinuousFileSplitEnumerator
         this.discoveryInterval = discoveryInterval;
         this.pathsAlreadyProcessed = new HashSet<>(alreadyDiscoveredPaths);
         this.readersAwaitingSplit = new LinkedHashMap<>();
+        this.partitionPruningWrapper = partitionPruningWrapper;
     }
 
     @Override
     public void start() {
+        partitionPruningWrapper.open();
         context.callAsync(
                 () -> enumerator.enumerateSplits(paths, 1),
                 this::processDiscoveredSplits,
@@ -144,9 +156,11 @@ public class ContinuousFileSplitEnumerator
 
         final Collection<FileSourceSplit> newSplits =
                 splits.stream()
+                        .filter(split -> partitionPruningWrapper.prune(convertSplitToPartitionSpec(split)))
                         .filter((split) -> pathsAlreadyProcessed.add(split.path()))
                         .collect(Collectors.toList());
         splitAssigner.addSplits(newSplits);
+
 
         assignSplits();
     }
@@ -175,5 +189,9 @@ public class ContinuousFileSplitEnumerator
                 break;
             }
         }
+    }
+
+    private CatalogPartitionSpec convertSplitToPartitionSpec(FileSourceSplit split) {
+       return new CatalogPartitionSpec(PartitionPathUtils.extractPartitionSpecFromPath(split.path()));
     }
 }

@@ -20,6 +20,7 @@ package org.apache.flink.connectors.hive;
 
 import org.apache.flink.annotation.VisibleForTesting;
 import org.apache.flink.api.common.eventtime.WatermarkStrategy;
+import org.apache.flink.api.common.functions.FilterFunction;
 import org.apache.flink.api.common.typeutils.TypeSerializer;
 import org.apache.flink.api.common.typeutils.base.LongSerializer;
 import org.apache.flink.api.common.typeutils.base.StringSerializer;
@@ -34,6 +35,7 @@ import org.apache.flink.streaming.api.datastream.DataStream;
 import org.apache.flink.streaming.api.datastream.DataStreamSource;
 import org.apache.flink.streaming.api.environment.StreamExecutionEnvironment;
 import org.apache.flink.table.api.TableSchema;
+import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.catalog.CatalogTable;
 import org.apache.flink.table.catalog.ObjectPath;
 import org.apache.flink.table.catalog.hive.client.HiveShim;
@@ -89,6 +91,7 @@ public class HiveTableSource
     // Remaining partition specs after partition pruning is performed. Null if pruning is not pushed
     // down.
     @Nullable private List<Map<String, String>> remainingPartitions = null;
+    @Nullable private FilterFunction<CatalogPartitionSpec> partitionsPruningFunction;
     protected int[] projectedFields;
     private Long limit = null;
 
@@ -133,6 +136,8 @@ public class HiveTableSource
                         .setLimit(limit);
 
         if (isStreamingSource()) {
+            Optional.ofNullable(partitionsPruningFunction)
+                    .ifPresent(sourceBuilder::setPartitionPruningFunction);
             DataStreamSource<RowData> sourceStream =
                     toDataStreamSource(execEnv, sourceBuilder.buildWithDefaultBulkFormat());
             providerContext.generateUid(HIVE_TRANSFORMATION).ifPresent(sourceStream::uid);
@@ -230,6 +235,12 @@ public class HiveTableSource
             throw new UnsupportedOperationException(
                     "Should not apply partitions to a non-partitioned table.");
         }
+    }
+
+    @Override
+    public void applyPartitionPuringFunction(
+            FilterFunction<CatalogPartitionSpec> partitionsPruningFunction) {
+        this.partitionsPruningFunction = partitionsPruningFunction;
     }
 
     @Override

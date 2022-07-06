@@ -26,9 +26,11 @@ import org.apache.flink.api.java.tuple.Tuple2;
 import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.PendingSplitsCheckpoint;
 import org.apache.flink.connector.file.src.assigners.FileSplitAssigner;
+import org.apache.flink.connector.file.src.util.PartitionPruningWrapper;
 import org.apache.flink.connector.file.table.ContinuousPartitionFetcher;
 import org.apache.flink.connectors.hive.read.HiveContinuousPartitionContext;
 import org.apache.flink.connectors.hive.read.HiveSourceSplit;
+import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.catalog.ObjectPath;
 
 import org.apache.hadoop.hive.metastore.api.Partition;
@@ -51,6 +53,7 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.Callable;
+import java.util.stream.Collectors;
 
 /** A continuously monitoring {@link SplitEnumerator} for hive source. */
 public class ContinuousHiveSplitEnumerator<T extends Comparable<T>>
@@ -70,6 +73,7 @@ public class ContinuousHiveSplitEnumerator<T extends Comparable<T>>
     // the partitions that have been processed for the current read offset
     private Collection<List<String>> seenPartitionsSinceOffset;
     private final PartitionMonitor<T> monitor;
+    private final PartitionPruningWrapper partitionPruningWrapper;
 
     public ContinuousHiveSplitEnumerator(
             SplitEnumeratorContext<HiveSourceSplit> enumeratorContext,
@@ -81,7 +85,8 @@ public class ContinuousHiveSplitEnumerator<T extends Comparable<T>>
             JobConf jobConf,
             ObjectPath tablePath,
             ContinuousPartitionFetcher<Partition, T> fetcher,
-            HiveTableSource.HiveContinuousPartitionFetcherContext<T> fetcherContext) {
+            HiveTableSource.HiveContinuousPartitionFetcherContext<T> fetcherContext,
+            PartitionPruningWrapper partitionPruningWrapper) {
         this.enumeratorContext = enumeratorContext;
         this.currentReadOffset = currentReadOffset;
         this.seenPartitionsSinceOffset = new ArrayList<>(seenPartitionsSinceOffset);
@@ -89,6 +94,7 @@ public class ContinuousHiveSplitEnumerator<T extends Comparable<T>>
         this.discoveryInterval = discoveryInterval;
         this.fetcherContext = fetcherContext;
         readersAwaitingSplit = new LinkedHashMap<>();
+        this.partitionPruningWrapper = partitionPruningWrapper;
         monitor =
                 new PartitionMonitor<>(
                         currentReadOffset,
@@ -97,12 +103,14 @@ public class ContinuousHiveSplitEnumerator<T extends Comparable<T>>
                         threadNum,
                         jobConf,
                         fetcher,
-                        fetcherContext);
+                        fetcherContext,
+                        partitionPruningWrapper);
     }
 
     @Override
     public void start() {
         try {
+            partitionPruningWrapper.open();
             fetcherContext.open();
             enumeratorContext.callAsync(
                     monitor, this::handleNewSplits, discoveryInterval, discoveryInterval);
@@ -191,6 +199,7 @@ public class ContinuousHiveSplitEnumerator<T extends Comparable<T>>
         private final JobConf jobConf;
         private final ContinuousPartitionFetcher<Partition, T> fetcher;
         private final HiveContinuousPartitionContext<Partition, T> fetcherContext;
+        private final PartitionPruningWrapper partitionPruningWrapper;
 
         PartitionMonitor(
                 T currentReadOffset,
@@ -199,7 +208,8 @@ public class ContinuousHiveSplitEnumerator<T extends Comparable<T>>
                 int threadNum,
                 JobConf jobConf,
                 ContinuousPartitionFetcher<Partition, T> fetcher,
-                HiveContinuousPartitionContext<Partition, T> fetcherContext) {
+                HiveContinuousPartitionContext<Partition, T> fetcherContext,
+                PartitionPruningWrapper partitionPruningWrapper) {
             this.currentReadOffset = currentReadOffset;
             this.seenPartitionsSinceOffset = new HashSet<>(seenPartitionsSinceOffset);
             this.tablePath = tablePath;
@@ -207,12 +217,22 @@ public class ContinuousHiveSplitEnumerator<T extends Comparable<T>>
             this.jobConf = jobConf;
             this.fetcher = fetcher;
             this.fetcherContext = fetcherContext;
+            this.partitionPruningWrapper = partitionPruningWrapper;
         }
 
         @Override
         public NewSplitsAndState<T> call() throws Exception {
             List<Tuple2<Partition, T>> partitions =
-                    fetcher.fetchPartitions(fetcherContext, currentReadOffset);
+                    fetcher.fetchPartitions(fetcherContext, currentReadOffset).stream()
+                            .filter(
+                                    (t -> {
+                                        HiveTablePartition hiveTablePartition =
+                                                fetcherContext.toHiveTablePartition(t.f0);
+                                        return partitionPruningWrapper.prune(
+                                                new CatalogPartitionSpec(
+                                                        hiveTablePartition.getPartitionSpec()));
+                                    }))
+                            .collect(Collectors.toList());
             if (partitions.isEmpty()) {
                 return new NewSplitsAndState<>(
                         Collections.emptyList(), currentReadOffset, seenPartitionsSinceOffset);

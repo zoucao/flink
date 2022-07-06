@@ -224,6 +224,7 @@ public class DynamicTableSourceSpecSerdeTest {
                                                         false, TimestampKind.ROWTIME, 3))),
                                 new LimitPushDownSpec(100),
                                 new PartitionPushDownSpec(
+                                        Arrays.asList("p"),
                                         Arrays.asList(
                                                 new HashMap<String, String>() {
                                                     {
@@ -234,7 +235,8 @@ public class DynamicTableSourceSpecSerdeTest {
                                                     {
                                                         put("p", "B");
                                                     }
-                                                }))));
+                                                }),
+                                        null)));
         return Stream.of(spec1, spec2);
     }
 

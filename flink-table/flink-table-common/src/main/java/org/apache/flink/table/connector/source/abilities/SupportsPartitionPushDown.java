@@ -19,6 +19,8 @@
 package org.apache.flink.table.connector.source.abilities;
 
 import org.apache.flink.annotation.PublicEvolving;
+import org.apache.flink.api.common.functions.FilterFunction;
+import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.connector.source.ScanTableSource;
 
 import java.util.List;
@@ -81,4 +83,7 @@ public interface SupportsPartitionPushDown {
      * <p>See the documentation of {@link SupportsPartitionPushDown} for more information.
      */
     void applyPartitions(List<Map<String, String>> remainingPartitions);
+
+    default void applyPartitionPuringFunction(
+            FilterFunction<CatalogPartitionSpec> partitionsPruningFunction) {};
 }

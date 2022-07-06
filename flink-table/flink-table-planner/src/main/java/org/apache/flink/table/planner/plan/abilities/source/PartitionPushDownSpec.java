@@ -18,13 +18,22 @@
 
 package org.apache.flink.table.planner.plan.abilities.source;
 
+import org.apache.flink.api.common.functions.RichFilterFunction;
 import org.apache.flink.table.api.TableException;
+import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.table.connector.source.DynamicTableSource;
 import org.apache.flink.table.connector.source.abilities.SupportsPartitionPushDown;
+import org.apache.flink.table.planner.plan.utils.FlinkRexUtil;
+import org.apache.flink.table.planner.plan.utils.PartitionPruner;
+import org.apache.flink.table.planner.utils.JavaScalaConversionUtil;
+import org.apache.flink.table.types.logical.LogicalType;
+import org.apache.flink.table.types.logical.RowType;
 
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonCreator;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonProperty;
 import org.apache.flink.shaded.jackson2.com.fasterxml.jackson.annotation.JsonTypeName;
+
+import org.apache.calcite.rex.RexNode;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -42,19 +51,61 @@ import static org.apache.flink.util.Preconditions.checkNotNull;
 public final class PartitionPushDownSpec extends SourceAbilitySpecBase {
     public static final String FIELD_NAME_PARTITIONS = "partitions";
 
+    public static final String REMAINING_PARTITIONS = "remainingPartitions";
+    public static final String FIELD_NAME_PREDICATES = "predicates";
+
+    @JsonProperty(REMAINING_PARTITIONS)
+    private final List<Map<String, String>> remainingPartitions;
+
     @JsonProperty(FIELD_NAME_PARTITIONS)
-    private final List<Map<String, String>> partitions;
+    private final List<String> partitions;
+
+    @JsonProperty(FIELD_NAME_PREDICATES)
+    private final RexNode predicates;
 
     @JsonCreator
     public PartitionPushDownSpec(
-            @JsonProperty(FIELD_NAME_PARTITIONS) List<Map<String, String>> partitions) {
-        this.partitions = new ArrayList<>(checkNotNull(partitions));
+            @JsonProperty(FIELD_NAME_PARTITIONS) List<String> partitions,
+            @JsonProperty(REMAINING_PARTITIONS) List<Map<String, String>> remainingPartitions,
+            @JsonProperty(FIELD_NAME_PREDICATES) RexNode predicates) {
+        this.partitions = partitions;
+        this.remainingPartitions = new ArrayList<>(checkNotNull(remainingPartitions));
+        this.predicates = predicates;
     }
 
     @Override
     public void apply(DynamicTableSource tableSource, SourceAbilityContext context) {
         if (tableSource instanceof SupportsPartitionPushDown) {
-            ((SupportsPartitionPushDown) tableSource).applyPartitions(partitions);
+            ((SupportsPartitionPushDown) tableSource).applyPartitions(remainingPartitions);
+            if (!context.isBatchMode()) {
+                List<String> inputFieldNames = context.getSourceRowType().getFieldNames();
+                List<RowType.RowField> rowFields = context.getSourceRowType().getFields();
+                LogicalType[] partitionFieldTypes =
+                        partitions.stream()
+                                .map(
+                                        name -> {
+                                            int index = inputFieldNames.indexOf(name);
+                                            if (index < 0) {
+                                                throw new TableException(
+                                                        String.format(
+                                                                "Partitioned key '%s' isn't found in input columns. "
+                                                                        + "It should be checked before.",
+                                                                name));
+                                            }
+                                            return rowFields.get(index).getType();
+                                        })
+                                .toArray(LogicalType[]::new);
+                RichFilterFunction<CatalogPartitionSpec> pruningFunction =
+                        PartitionPruner.generatePruningFunction(
+                                context.getTableConfig(),
+                                context.getClassLoader(),
+                                partitions.toArray(new String[0]),
+                                partitionFieldTypes,
+                                predicates);
+                ((SupportsPartitionPushDown) tableSource)
+                        .applyPartitionPuringFunction(pruningFunction);
+            }
+
         } else {
             throw new TableException(
                     String.format(
@@ -64,14 +115,26 @@ public final class PartitionPushDownSpec extends SourceAbilitySpecBase {
     }
 
     public List<Map<String, String>> getPartitions() {
-        return partitions;
+        return remainingPartitions;
     }
 
     @Override
     public String getDigests(SourceAbilityContext context) {
-        return "partitions=["
-                + this.partitions.stream().map(Object::toString).collect(Collectors.joining(", "))
-                + "]";
+        String digests = "";
+        if (context.isBatchMode()) {
+            digests =
+                    this.partitions.stream()
+                            .map(Object::toString)
+                            .collect(Collectors.joining(", "));
+        } else {
+            final RowType sourceRowType = context.getSourceRowType();
+            digests =
+                    FlinkRexUtil.getExpressionString(
+                            predicates,
+                            JavaScalaConversionUtil.toScala(sourceRowType.getFieldNames()));
+        }
+
+        return "partitions=[" + digests + "]";
     }
 
     @Override
@@ -86,11 +149,13 @@ public final class PartitionPushDownSpec extends SourceAbilitySpecBase {
             return false;
         }
         PartitionPushDownSpec that = (PartitionPushDownSpec) o;
-        return Objects.equals(partitions, that.partitions);
+        return Objects.equals(partitions, that.partitions)
+                && Objects.equals(remainingPartitions, that.remainingPartitions)
+                && Objects.equals(predicates, that.predicates);
     }
 
     @Override
     public int hashCode() {
-        return Objects.hash(super.hashCode(), partitions);
+        return Objects.hash(super.hashCode(), partitions, remainingPartitions, predicates);
     }
 }

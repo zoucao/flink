@@ -179,7 +179,8 @@ public class PushPartitionIntoTableSourceScanRule extends RelOptRule {
         // apply push down
         DynamicTableSource dynamicTableSource = tableSourceTable.tableSource().copy();
         PartitionPushDownSpec partitionPushDownSpec =
-                new PartitionPushDownSpec(remainingPartitions);
+                new PartitionPushDownSpec(
+                        partitionFieldNames, remainingPartitions, finalPartitionPredicate);
         partitionPushDownSpec.apply(dynamicTableSource, SourceAbilityContext.from(scan));
 
         TableSourceTable newTableSourceTable =

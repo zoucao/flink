@@ -17,14 +17,17 @@
  */
 package org.apache.flink.table.planner.plan.utils
 
-import org.apache.flink.api.common.functions.{MapFunction, RichMapFunction}
+import org.apache.flink.api.common.functions.{FilterFunction, MapFunction, RichFilterFunction, RichMapFunction}
 import org.apache.flink.api.common.functions.util.ListCollector
 import org.apache.flink.configuration.Configuration
 import org.apache.flink.table.api.{TableConfig, TableException}
+import org.apache.flink.table.catalog.CatalogPartitionSpec
 import org.apache.flink.table.data.{DecimalDataUtils, GenericRowData, StringData, TimestampData}
 import org.apache.flink.table.planner.codegen.{ConstantCodeGeneratorContext, ExprCodeGenerator, FunctionCodeGenerator}
-import org.apache.flink.table.planner.codegen.CodeGenUtils.DEFAULT_COLLECTOR_TERM
+import org.apache.flink.table.planner.codegen.CodeGenUtils.{newName, DEFAULT_COLLECTOR_TERM, GENERIC_ROW}
+import org.apache.flink.table.planner.codegen.Indenter.toISC
 import org.apache.flink.table.planner.utils.TableConfigUtils
+import org.apache.flink.table.runtime.generated.GeneratedFunction
 import org.apache.flink.table.runtime.typeutils.InternalTypeInfo
 import org.apache.flink.table.types.logical.{BooleanType, DecimalType, LogicalType}
 import org.apache.flink.table.types.logical.LogicalTypeRoot._
@@ -90,59 +93,115 @@ object PartitionPruner {
       return allPartitions
     }
 
-    val inputType = InternalTypeInfo.ofFields(partitionFieldTypes, partitionFieldNames).toRowType
-    val returnType: LogicalType = new BooleanType(false)
-
-    val ctx = new ConstantCodeGeneratorContext(tableConfig, classLoader)
-    val collectorTerm = DEFAULT_COLLECTOR_TERM
-
-    val exprGenerator = new ExprCodeGenerator(ctx, false)
-      .bindInput(inputType)
-
-    val filterExpression = exprGenerator.generateExpression(partitionPredicate)
-
-    val filterFunctionBody =
-      s"""
-         |${filterExpression.code}
-         |return ${filterExpression.resultTerm};
-         |""".stripMargin
-
-    val genFunction = FunctionCodeGenerator.generateFunction(
-      ctx,
-      "PartitionPruner",
-      classOf[MapFunction[GenericRowData, Boolean]],
-      filterFunctionBody,
-      returnType,
-      inputType,
-      collectorTerm = collectorTerm)
-
-    val function = genFunction.newInstance(classLoader)
-    val richMapFunction = function match {
-      case r: RichMapFunction[GenericRowData, Boolean] => r
-      case _ => throw new TableException("RichMapFunction[GenericRowData, Boolean] required here")
-    }
-
     val results: JList[Boolean] = new JArrayList[Boolean](allPartitions.size)
     val collector = new ListCollector[Boolean](results)
+    val filterFunc =
+      generatePruningFunction(
+        tableConfig,
+        classLoader,
+        partitionFieldNames,
+        partitionFieldTypes,
+        partitionPredicate)
 
     try {
-      richMapFunction.open(new Configuration)
+      filterFunc.open(new Configuration)
       // do filter against all partitions
       allPartitions.foreach {
-        partition =>
-          val row = convertPartitionToRow(
-            TableConfigUtils.getLocalTimeZone(tableConfig),
-            partitionFieldNames,
-            partitionFieldTypes,
-            partition)
-          collector.collect(richMapFunction.map(row))
+        partition => collector.collect(filterFunc.filter(new CatalogPartitionSpec(partition)))
       }
     } finally {
-      richMapFunction.close()
+      filterFunc.close()
     }
 
     // get pruned partitions
     allPartitions.zipWithIndex.filter { case (_, index) => results.get(index) }.map(_._1)
+  }
+
+  def generatePruningFunction(
+      tableConfig: TableConfig,
+      classLoader: ClassLoader,
+      partitionFieldNames: Array[String],
+      partitionFieldTypes: Array[LogicalType],
+      partitionPredicate: RexNode): RichFilterFunction[CatalogPartitionSpec] = {
+    val rowType = InternalTypeInfo.ofFields(partitionFieldTypes, partitionFieldNames).toRowType
+
+    val funcName = newName("PartitionPruner")
+
+    val ctx = new ConstantCodeGeneratorContext(tableConfig, classLoader)
+
+    val exprGenerator = new ExprCodeGenerator(ctx, false)
+      .bindInput(rowType)
+
+    val filterExpression = exprGenerator.generateExpression(partitionPredicate)
+
+    val partitionSpecToRowData = {
+      val initRow = partitionFieldNames.zipWithIndex
+        .map {
+          case (name, index) =>
+            s"in1.setField($index, spec.getPartitionSpec().get($name));"
+        }
+        .mkString("\n")
+
+      s"""
+         |org.apache.flink.table.catalog.CatalogPartitionSpec spec =
+         |  (org.apache.flink.table.catalog.CatalogPartitionSpec) _in;
+         |$GENERIC_ROW in1 = new $GENERIC_ROW(${partitionFieldNames.size});
+         |$initRow
+         |""".stripMargin
+    }
+
+    val filterFunctionBody =
+      s"""
+         |$partitionSpecToRowData
+         |${filterExpression.code}
+         |return ${filterExpression.resultTerm};
+         |""".stripMargin
+
+    val funcCode =
+      j"""
+      ${ctx.getClassHeaderComment}
+      public class $funcName
+          extends ${classOf[RichFilterFunction[_]].getCanonicalName} {
+
+        ${ctx.reuseMemberCode()}
+
+        public $funcName(Object[] references) throws Exception {
+          ${ctx.reuseInitCode()}
+        }
+
+        ${ctx.reuseConstructorCode(funcName)}
+
+        @Override
+        public void open(${classOf[Configuration].getCanonicalName} parameters) throws Exception {
+          ${ctx.reuseOpenCode()}
+        }
+
+        @Override
+        public boolean filter(Object _in1) throws Exception {
+          ${ctx.reusePerRecordCode()}
+          ${ctx.reuseLocalVariableCode()}
+          ${ctx.reuseInputUnboxingCode()}
+          $filterFunctionBody
+
+        }
+
+        @Override
+        public void close() throws Exception {
+          ${ctx.reuseCloseCode()}
+        }
+
+        ${ctx.reuseInnerClassDefinitionCode()}
+      }
+    """.stripMargin
+
+    val generatedFunc =
+      new GeneratedFunction(funcName, funcCode, ctx.references.toArray, ctx.tableConfig)
+
+    generatedFunc.newInstance(classLoader) match {
+      case r: RichFilterFunction[CatalogPartitionSpec] => r
+      case _ => throw new TableException("RichFilterFunction[CatalogPartitionSpec] required here")
+    }
+
   }
 
   /** create new Row from partition, set partition values to corresponding positions of row. */

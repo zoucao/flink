@@ -23,6 +23,7 @@ import org.apache.flink.connector.file.src.FileSourceSplit;
 import org.apache.flink.connector.file.src.assigners.SimpleSplitAssigner;
 import org.apache.flink.connector.file.src.enumerate.FileEnumerator;
 import org.apache.flink.connector.file.src.testutils.TestingFileEnumerator;
+import org.apache.flink.connector.file.src.util.PartitionPruningWrapper;
 import org.apache.flink.connector.testutils.source.reader.TestingSplitEnumeratorContext;
 import org.apache.flink.core.fs.Path;
 
@@ -127,7 +128,8 @@ class ContinuousFileSplitEnumeratorTest {
                         new SimpleSplitAssigner(Collections.emptyList()),
                         new Path[] {Path.fromLocalFile(TMP_DIR)},
                         Collections.emptySet(),
-                        10L);
+                        10L,
+                        PartitionPruningWrapper.wrap(null));
         enumerator.start();
         return enumerator;
     }

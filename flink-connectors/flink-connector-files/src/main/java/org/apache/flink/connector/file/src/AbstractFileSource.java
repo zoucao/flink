@@ -19,6 +19,7 @@
 package org.apache.flink.connector.file.src;
 
 import org.apache.flink.annotation.PublicEvolving;
+import org.apache.flink.api.common.functions.FilterFunction;
 import org.apache.flink.api.common.typeinfo.TypeInformation;
 import org.apache.flink.api.connector.source.Boundedness;
 import org.apache.flink.api.connector.source.Source;
@@ -34,8 +35,10 @@ import org.apache.flink.connector.file.src.impl.FileSourceReader;
 import org.apache.flink.connector.file.src.impl.StaticFileSplitEnumerator;
 import org.apache.flink.connector.file.src.reader.BulkFormat;
 import org.apache.flink.connector.file.src.reader.StreamFormat;
+import org.apache.flink.connector.file.src.util.PartitionPruningWrapper;
 import org.apache.flink.core.fs.Path;
 import org.apache.flink.core.io.SimpleVersionedSerializer;
+import org.apache.flink.table.catalog.CatalogPartitionSpec;
 import org.apache.flink.util.FlinkRuntimeException;
 
 import javax.annotation.Nullable;
@@ -79,6 +82,8 @@ public abstract class AbstractFileSource<T, SplitT extends FileSourceSplit>
 
     @Nullable private final ContinuousEnumerationSettings continuousEnumerationSettings;
 
+    protected final PartitionPruningWrapper partitionPruningWrapper;
+
     // ------------------------------------------------------------------------
 
     protected AbstractFileSource(
@@ -86,7 +91,8 @@ public abstract class AbstractFileSource<T, SplitT extends FileSourceSplit>
             final FileEnumerator.Provider fileEnumerator,
             final FileSplitAssigner.Provider splitAssigner,
             final BulkFormat<T, SplitT> readerFormat,
-            @Nullable final ContinuousEnumerationSettings continuousEnumerationSettings) {
+            @Nullable final ContinuousEnumerationSettings continuousEnumerationSettings,
+            @Nullable final FilterFunction<CatalogPartitionSpec> partitionsPruningFunction) {
 
         checkArgument(inputPaths.length > 0);
         this.inputPaths = inputPaths;
@@ -94,6 +100,7 @@ public abstract class AbstractFileSource<T, SplitT extends FileSourceSplit>
         this.assignerFactory = checkNotNull(splitAssigner);
         this.readerFormat = checkNotNull(readerFormat);
         this.continuousEnumerationSettings = continuousEnumerationSettings;
+        this.partitionPruningWrapper = PartitionPruningWrapper.wrap(partitionsPruningFunction);
     }
 
     // ------------------------------------------------------------------------
@@ -211,7 +218,9 @@ public abstract class AbstractFileSource<T, SplitT extends FileSourceSplit>
                             splitAssigner,
                             inputPaths,
                             alreadyProcessedPaths,
-                            continuousEnumerationSettings.getDiscoveryInterval().toMillis()));
+                            continuousEnumerationSettings.getDiscoveryInterval().toMillis(),
+                            partitionPruningWrapper)
+                    );
         }
     }
 
@@ -264,6 +273,7 @@ public abstract class AbstractFileSource<T, SplitT extends FileSourceSplit>
         protected FileEnumerator.Provider fileEnumerator;
         protected FileSplitAssigner.Provider splitAssigner;
         @Nullable protected ContinuousEnumerationSettings continuousSourceSettings;
+        @Nullable protected FilterFunction<CatalogPartitionSpec> partitionsPruningFunction;
 
         protected AbstractFileSourceBuilder(
                 final Path[] inputPaths,
@@ -299,6 +309,12 @@ public abstract class AbstractFileSource<T, SplitT extends FileSourceSplit>
                     "discoveryInterval must be > 0");
 
             this.continuousSourceSettings = new ContinuousEnumerationSettings(discoveryInterval);
+            return self();
+        }
+
+        public SELF partitionsPruningFunction(FilterFunction<CatalogPartitionSpec> partitionsPruningFunction) {
+            checkNotNull(partitionsPruningFunction, "partitionsPruningFunction should not be null.");
+            this.partitionsPruningFunction = partitionsPruningFunction;
             return self();
         }
 
